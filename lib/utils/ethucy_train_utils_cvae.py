@@ -12,6 +12,9 @@ from torch.utils import data
 
 from lib.utils.eval_utils import eval_ethucy, eval_ethucy_cvae
 from lib.losses import cvae, cvae_multi
+from sklearn.utils import shuffle
+
+#torch.autograd.set_detect_anomaly(True)
 
 def train(model, train_gen, criterion, optimizer, device):
     model.train() # Sets the module in training mode.
@@ -36,7 +39,7 @@ def train(model, train_gen, criterion, optimizer, device):
 
             all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = target_traj, start_index = first_history_index, training =  False)
             cvae_loss = cvae_multi(cvae_dec_traj,target_traj, first_history_index[0])
-            #import pdb; pdb.set_trace()
+
             goal_loss = criterion(all_goal_traj[:,first_history_index[0]:,:,:], target_traj[:,first_history_index[0]:,:,:])
             train_loss = goal_loss + cvae_loss  + KLD_loss.mean()
 
@@ -54,6 +57,155 @@ def train(model, train_gen, criterion, optimizer, device):
     total_KLD_loss/= count
     
     return total_goal_loss, total_cvae_loss, total_KLD_loss
+
+
+def self_train(model, val_gen, train_gen, criterion, mmd_criterion, optimizer, device):
+
+    total_goal_loss = 0
+    total_dec_loss = 0
+    total_cvae_loss = 0
+    total_KLD_loss = 0
+    count = 0
+    ps_labels = []
+    ps_input = []
+    ps_first_history_index = []
+    target_features = []
+
+    val_input = []
+    val_labels = []
+    val_first_history_index = []
+    train_labels = []
+    train_input = []
+    train_first_history_index = []
+    source_features = []
+
+    val_loader = tqdm(val_gen, total=len(val_gen))
+    train_loader = tqdm(train_gen, total=len(train_gen))
+
+
+    # get pseudo-labels
+    with torch.set_grad_enabled(False):
+          for batch_idx, data in enumerate(val_loader):
+             model.train()
+             first_history_index = data['first_history_index']
+             assert torch.unique(first_history_index).shape[0] == 1
+             input_traj = data['input_x'].to(device)
+             pred_trajs = []
+             for s in range(30):
+                 cvae_dec_hidden, all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = None, start_index = first_history_index, training =  False)
+                 #pred_traj = torch.mean(cvae_dec_traj, 3)
+                 pred_traj = cvae_dec_traj[:,:,:,0,:]
+                 pred_trajs.append(pred_traj)
+
+             pred_trajs = torch.stack(pred_trajs)
+             pred_traj_mean = torch.mean(pred_trajs, 0)
+             pred_trajs_ = pred_trajs[:,:,-1,:,:]
+             #samples, batch, 12, 2 -> samples, batch, 12*2
+             pred_trajs_ = pred_trajs_.view(pred_trajs_.size(0), pred_trajs_.size(1), -1)
+             #swap samples with batch
+             pred_trajs_ = pred_trajs_.transpose(0, 1)
+             # batch, samples, 12*2 -> batch, 12*2*samples
+             pred_trajs_ = pred_trajs_.reshape(pred_trajs_.shape[0], pred_trajs_.shape[1]*pred_trajs_.shape[2])
+             pred_trajs_var = torch.var(pred_trajs_, 1)
+
+             #filter pseudo trajectories above certain variance
+             pseudo_labels_certain = pred_trajs_var < 99
+             ps_labels.append(pred_traj_mean[pseudo_labels_certain])
+
+             ps_input.append(input_traj[pseudo_labels_certain])
+             ps_first_history_index.append(first_history_index[pseudo_labels_certain])
+
+
+
+    # get val data
+    #for batch_idx, data in enumerate(val_loader):
+
+        #first_history_index = data['first_history_index']
+        #assert torch.unique(first_history_index).shape[0] == 1
+        #input_traj = data['input_x'].to(device)
+        #target_traj = data['target_y'].to(device)
+        #val_labels.append(target_traj)
+        #val_input.append(input_traj)
+        #val_first_history_index.append(first_history_index)
+
+    # get train data
+    for batch_idx, data in enumerate(train_loader):
+        # batch_size = data['input_x'].shape[0]
+        first_history_index = data['first_history_index']
+        assert torch.unique(first_history_index).shape[0] == 1
+        input_traj = data['input_x'].to(device)
+        target_traj = data['target_y'].to(device)
+        train_labels.append(target_traj)
+        train_input.append(input_traj)
+        train_first_history_index.append(first_history_index)
+
+
+    #input_combined = ps_input + train_input
+    #labels_combined = ps_labels + train_labels
+
+    #first_history_index_combined = ps_first_history_index + train_first_history_index
+
+    #input_combined_shuffled, labels_combined_shuffled, first_history_index_shuffled = shuffle(np.array(input_combined),
+                                                                                              #np.array(labels_combined),
+                                                                                              #first_history_index_combined)
+
+    model.train()
+    with torch.set_grad_enabled(True):
+        #for i, l, h in zip(ps_input, ps_labels, ps_first_history_index):
+        for i_t, l_t, h_t, i_s, l_s, h_s in zip(ps_input, ps_labels, ps_first_history_index, train_input, train_labels, train_first_history_index):
+
+            first_history_index_t = h_t
+            input_traj_t = i_t
+            target_traj_t = l_t
+            first_history_index_s = h_s
+            input_traj_s = i_s
+            target_traj_s = l_s
+
+            batch_size = input_traj.shape[0]
+            count += batch_size
+
+            #target
+            cvae_dec_hidden_t, all_goal_traj_t, cvae_dec_traj_t, KLD_loss_t, _ = model(input_traj_t, map_mask=None, targets=target_traj_t,
+                                                              start_index=first_history_index_t, training=False)
+            cvae_loss_t = cvae_multi(cvae_dec_traj_t, target_traj_t, first_history_index_t[0])
+
+            goal_loss_t = criterion(all_goal_traj_t[:, first_history_index_t[0]:, :, :],
+                                  target_traj_t[:, first_history_index_t[0]:, :, :])
+
+            #source
+            cvae_dec_hidden_s, all_goal_traj_s, cvae_dec_traj_s, KLD_loss_s, _ = model(input_traj_s, map_mask=None,
+                                                                                       targets=target_traj_s,
+                                                                                       start_index=first_history_index_s,
+                                                                                       training=False)
+            cvae_loss_s = cvae_multi(cvae_dec_traj_s, target_traj_s, first_history_index_s[0])
+
+            goal_loss_s = criterion(all_goal_traj_s[:, first_history_index_s[0]:, :, :],
+                                    target_traj_s[:, first_history_index_s[0]:, :, :])
+            features_min = torch.min(torch.tensor([cvae_dec_hidden_t.shape[0], cvae_dec_hidden_s.shape[0]]))
+            #print(features_min)
+
+            #print("target features ", cvae_dec_hidden_t.shape)
+            #print("source features ", cvae_dec_hidden_s.shape)
+            mmd_loss = mmd_criterion(torch.mean(cvae_dec_hidden_t[:features_min,:,:], 1), torch.mean(cvae_dec_hidden_s[:features_min,:,:], 1))
+
+            #total_loss = (goal_loss_s) + (cvae_loss_s) + (KLD_loss_s.mean()) + mmd_loss
+            total_loss = goal_loss_s + cvae_loss_s + KLD_loss_s.mean() + (10*mmd_loss)
+
+            #total_goal_loss += goal_loss.item() * batch_size
+            #total_cvae_loss += cvae_loss.item() * batch_size
+            #total_KLD_loss += KLD_loss.mean() * batch_size
+
+            # optimize
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
+
+        #total_goal_loss /= count
+        #total_cvae_loss /= count
+        #total_KLD_loss /= count
+
+        return total_goal_loss, total_cvae_loss, total_KLD_loss
+
 
 def val(model, val_gen, criterion, device):
     total_goal_loss = 0
@@ -75,7 +227,7 @@ def val(model, val_gen, criterion, device):
             input_traj_st = data['input_x_st'].to(device)
             target_traj = data['target_y'].to(device)
 
-            all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = None, start_index = first_history_index, training =  False)
+            cvae_dec_hidden, all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = None, start_index = first_history_index, training =  False)
             cvae_loss = cvae_multi(cvae_dec_traj,target_traj)
             
 
@@ -87,7 +239,7 @@ def val(model, val_gen, criterion, device):
 
     val_loss = total_goal_loss/count \
          + total_cvae_loss/count+ total_KLD_loss/ count
-    #import pdb;pdb.set_trace()
+
     return val_loss
 
 def test(model, test_gen, criterion, device):
@@ -115,7 +267,7 @@ def test(model, test_gen, criterion, device):
             input_traj_st = data['input_x_st'].to(device)
             target_traj = data['target_y'].to(device)
 
-            all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = None, start_index = first_history_index, training =  False)
+            cvae_dec_hidden, all_goal_traj, cvae_dec_traj, KLD_loss, _ = model(input_traj, map_mask = None, targets = None, start_index = first_history_index, training =  False)
             cvae_loss = cvae_multi(cvae_dec_traj,target_traj)
             goal_loss = criterion(all_goal_traj[:,first_history_index[0]:,:,:], target_traj[:,first_history_index[0]:,:,:])
 

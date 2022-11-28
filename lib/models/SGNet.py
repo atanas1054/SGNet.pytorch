@@ -18,7 +18,7 @@ class SGNet(nn.Module):
             self.regressor = nn.Sequential(nn.Linear(self.hidden_size, 
                                                      self.pred_dim),
                                                      nn.Tanh())
-            self.flow_enc_cell = nn.GRUCell(self.hidden_size*2, self.hidden_size)
+            #self.flow_enc_cell = nn.GRUCell(self.hidden_size*2, self.hidden_size)
         elif self.dataset in ['ETH', 'HOTEL','UNIV','ZARA1', 'ZARA2']:
             self.pred_dim = 2
             self.regressor = nn.Sequential(nn.Linear(self.hidden_size, 

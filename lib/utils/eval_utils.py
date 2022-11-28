@@ -2,7 +2,7 @@ import os
 import json
 import numpy as np
 from .data_utils import bbox_denormalize, cxcywh_to_x1y1x2y2
-from nuscenes.prediction import convert_local_coords_to_global
+#from nuscenes.prediction import convert_local_coords_to_global
 def compute_IOU(bbox_true, bbox_pred, format='xywh'):
     '''
     compute IOU
