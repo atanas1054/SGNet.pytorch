@@ -10,13 +10,15 @@ from torch import nn, optim
 from torch.nn import functional as F
 from torch.utils import data
 
-
 from configs.ethucy import parse_sgnet_args as parse_args
 import lib.utils as utl
 from lib.models import build_model
 from lib.losses import rmse_loss
-from lib.utils.ethucy_train_utils import train, val, test
+from lib.utils.ethucy_train_utils import train, val, test, self_train
+from torch.utils.tensorboard import SummaryWriter
 
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
 def main(args):
     this_dir = osp.dirname(__file__)
@@ -46,6 +48,7 @@ def main(args):
     train_gen = utl.build_data_loader(args, 'train', batch_size = 1)
     val_gen = utl.build_data_loader(args, 'val', batch_size = 1)
     test_gen = utl.build_data_loader(args, 'test', batch_size = 1)
+    print("Number of train samples:", train_gen.__len__())
     print("Number of validation samples:", val_gen.__len__())
     print("Number of test samples:", test_gen.__len__())
     # train
@@ -57,24 +60,58 @@ def main(args):
     best_model = None
     best_model_metric = None
 
+    tb = SummaryWriter()
 
     for epoch in range(args.start_epoch, args.epochs+args.start_epoch):
 
-        train_goal_loss, train_dec_loss, total_train_loss = train(model, train_gen, criterion, optimizer, device)
+        #train_goal_loss, train_dec_loss, total_train_loss = self_train(model, val_gen, criterion, optimizer, device)
+        self_train_goal_loss, self_train_dec_loss, self_train_total_loss = self_train(model, val_gen, train_gen,
+                                                                                      criterion,
+                                                                                      optimizer, device)
 
-        print('Train Epoch: {} \t Goal loss: {:.4f}\t Decoder loss: {:.4f}\t Total: {:.4f}'.format(
-                epoch, train_goal_loss, train_dec_loss, total_train_loss))
+        #print('Self-Train Epoch: {} \t Goal loss: {:.4f}\t Decoder loss: {:.4f}\t Total: {:.4f}'.format(
+            #epoch, train_goal_loss, train_dec_loss, total_train_loss))
 
+        #train_goal_loss, train_dec_loss, total_train_loss = train(model, train_gen, criterion, optimizer, device)
 
+        #print('Train Epoch: {} \t Goal loss: {:.4f}\t Decoder loss: {:.4f}\t Total: {:.4f}'.format(
+            #epoch, train_goal_loss, train_dec_loss, total_train_loss))
 
         # val
-        val_loss = val(model, val_gen, criterion, device)
+        #val_loss = val(model, val_gen, criterion, device)
         # lr_scheduler.step(val_loss)
 
 
         # test
         test_loss, ADE_08, FDE_08, ADE_12, FDE_12 = test(model, test_gen, criterion, device)
+        print("ADE_08: %4f;  FDE_08: %4f;  ADE_10: %4f;   FDE_12: %4f\n" % (ADE_08, FDE_08, ADE_12, FDE_12))
+        lr_scheduler.step(test_loss)
 
+        tb.add_scalar("test_loss", test_loss, epoch)
+        tb.add_scalar("ADE_08", ADE_08, epoch)
+        tb.add_scalar("FDE_08", FDE_08, epoch)
+        tb.add_scalar("ADE_12", ADE_12, epoch)
+        tb.add_scalar("FDE_12", FDE_12, epoch)
+
+        # save checkpoints if performance increases
+        if ADE_08 < min_loss:
+            try:
+                os.remove(best_model)
+            except:
+                pass
+
+            min_loss = ADE_08
+            saved_model_name = 'epoch_' + str(format(epoch, '03')) + '_bestADE08_%.4f' % min_loss + '.pth'
+
+            print("Saving checkpoints: " + saved_model_name)
+            if not os.path.isdir(save_dir):
+                os.mkdir(save_dir)
+
+            save_dict = {'epoch': epoch,
+                         'model_state_dict': model.state_dict(),
+                         'optimizer_state_dict': optimizer.state_dict()}
+            torch.save(save_dict, os.path.join(save_dir, saved_model_name))
+            best_model = os.path.join(save_dir, saved_model_name)
 
 if __name__ == '__main__':
     main(parse_args())
