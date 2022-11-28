@@ -5,6 +5,7 @@ __all__ = ['parse_sgnet_args']
 def parse_sgnet_args():
     parser = parse_base_args()
     parser.add_argument('--dataset', default='ETH', type=str)
+    parser.add_argument('--target_dataset', default='HOTEL', type=str)
     parser.add_argument('--lr', default=5e-04, type=float) # ETH 0.0005，HOTEL 0.0001, UNIV 0.0001, ZARA1 0.0001, ZARA2 0.0001
     parser.add_argument('--eth_root', default='data/ETHUCY', type=str)
     parser.add_argument('--model', default='SGNet_CVAE', type=str)

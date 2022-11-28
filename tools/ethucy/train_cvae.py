@@ -13,8 +13,12 @@ from torch.utils import data
 import lib.utils as utl
 from configs.ethucy import parse_sgnet_args as parse_args
 from lib.models import build_model
-from lib.losses import rmse_loss
-from lib.utils.ethucy_train_utils_cvae import train, val, test
+from lib.losses import rmse_loss, MMD_loss, coral_loss
+from lib.utils.ethucy_train_utils_cvae import train, val, test, self_train
+from torch.utils.tensorboard import SummaryWriter
+
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+os.environ["CUDA_VISIBLE_DEVICES"]='1'
 
 def main(args):
     this_dir = osp.dirname(__file__)
@@ -41,14 +45,15 @@ def main(args):
         del checkpoint
 
     criterion = rmse_loss().to(device)
+    mmd_criterion = MMD_loss().to(device)
+    coral_criterion = coral_loss().to(device)
 
     train_gen = utl.build_data_loader(args, 'train', batch_size = 1)
     val_gen = utl.build_data_loader(args, 'val', batch_size = 1)
+    target_val = utl.build_data_loader(args, 'val_t', batch_size = 1)
     test_gen = utl.build_data_loader(args, 'test', batch_size = 1)
     print("Number of validation samples:", val_gen.__len__())
     print("Number of test samples:", test_gen.__len__())
-
-
 
     # train
     min_loss = 1e6
@@ -59,20 +64,45 @@ def main(args):
     best_model = None
     best_model_metric = None
 
+    tb = SummaryWriter(args.exp_name)
+
     for epoch in range(args.start_epoch, args.epochs+args.start_epoch):
-        print("Number of training samples:", len(train_gen))
+        #print("Number of training samples:", len(train_gen))
 
         # train
-        train_goal_loss, train_cvae_loss, train_KLD_loss = train(model, train_gen, criterion, optimizer, device)
+        #train_goal_loss, train_cvae_loss, train_KLD_loss = train(model, train_gen, criterion, optimizer, device)
+        train_goal_loss, train_cvae_loss, train_KLD_loss = self_train(model, target_val, train_gen, criterion, mmd_criterion, optimizer, device)
         # print('Train Epoch: ', epoch, 'Goal loss: ', train_goal_loss, 'Decoder loss: ', train_dec_loss, 'CVAE loss: ', train_cvae_loss, \
         #     'KLD loss: ', train_KLD_loss, 'Total: ', total_train_loss) 
-        print('Train Epoch: {} \t Goal loss: {:.4f}\t  CVAE loss: {:.4f}\t KLD loss: {:.4f}\t Total: {:.4f}'.format(
-                epoch,train_goal_loss, train_cvae_loss, train_KLD_loss, train_goal_loss + train_cvae_loss + train_KLD_loss ))
+        #print('Train Epoch: {} \t Goal loss: {:.4f}\t  CVAE loss: {:.4f}\t KLD loss: {:.4f}\t Total: {:.4f}'.format(
+                #epoch,train_goal_loss, train_cvae_loss, train_KLD_loss, train_goal_loss + train_cvae_loss + train_KLD_loss ))
 
 
         # val
         val_loss = val(model, val_gen, criterion, device)
-        lr_scheduler.step(val_loss)
+
+        tb.add_scalar("val_loss", val_loss, epoch)
+        #lr_scheduler.step(val_loss)
+
+        #save checkpoints if performance increases
+        # if val_loss < min_loss:
+        #     try:
+        #         os.remove(best_model)
+        #     except:
+        #         pass
+        #
+        #     min_loss = val_loss
+        #     saved_model_name = 'epoch_' + str(format(epoch, '03')) + '_bestValLoss_%.4f' % min_loss + '.pth'
+        #
+        #     print("Saving checkpoints: " + saved_model_name)
+        #     if not os.path.isdir(save_dir):
+        #         os.mkdir(save_dir)
+        #
+        #     save_dict = {'epoch': epoch,
+        #                  'model_state_dict': model.state_dict(),
+        #                  'optimizer_state_dict': optimizer.state_dict()}
+        #     torch.save(save_dict, os.path.join(save_dir, saved_model_name))
+        #     best_model = os.path.join(save_dir, saved_model_name)
 
 
         # test
@@ -80,6 +110,11 @@ def main(args):
         print("Test Loss: {:.4f}".format(test_loss))
         print("ADE_08: %4f;  FDE_08: %4f;  ADE_12: %4f;   FDE_12: %4f\n" % (ADE_08, FDE_08, ADE_12, FDE_12))
 
+        tb.add_scalar("test_loss", test_loss, epoch)
+        tb.add_scalar("ADE_08", ADE_08, epoch)
+        tb.add_scalar("FDE_08", FDE_08, epoch)
+        tb.add_scalar("ADE_12", ADE_12, epoch)
+        tb.add_scalar("FDE_12", FDE_12, epoch)
 
 if __name__ == '__main__':
     main(parse_args())
