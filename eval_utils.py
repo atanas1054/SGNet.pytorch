@@ -214,22 +214,21 @@ def plot_trajs(trajs_pred, trajs_obs, first_history_index):
 
             plt.xlabel("X")
             plt.ylabel("Y")
-            plt.title("ZARA2")
+            plt.title("ETH")
             #plt.plot(x, y, color="red", marker="o", linewidth=0.5, markersize=1, mfc='none')
 
-    plt.figure(figsize=(7, 5))
-    plt.savefig('trajs.pdf', bbox_inches='tight')
+    plt.savefig('trajs.pdf')
     return 0
 
 def plot_var_pred(vars, pred):
 
     vars = np.array(vars, dtype=float)
     pred = np.array(pred, dtype=float)
-    plt.scatter(vars, pred, s=0.5)
+    plt.scatter(vars, pred, s=0.1)
     a, b = np.polyfit(vars, pred, 1)
     plt.plot(vars, a * vars + b, color='red', linestyle='--')
-    plt.xlabel("Variance",  fontsize=18)
-    plt.ylabel("Average Displacement Error",  fontsize=18)
+    plt.xlabel("Variance")
+    plt.ylabel("Average Displacement Error")
     plt.savefig('var_vs_error.pdf')
 
 

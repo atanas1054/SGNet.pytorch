@@ -142,7 +142,7 @@ class SGNet_CVAE(nn.Module):
                 map_input = flow_input
                 cvae_dec_hidden = (cvae_dec_hidden + map_input.unsqueeze(1))/2
             all_cvae_dec_traj[:,enc_step,:,:,:] = self.cvae_decoder(cvae_dec_hidden, goal_for_dec)
-        return cvae_dec_hidden, all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
+        return enc_hidden, all_goal_traj, all_cvae_dec_traj, total_KLD, total_probabilities
             
     def forward(self, inputs, map_mask=None, targets = None, start_index = 0, training=True):
         self.training = training
@@ -156,5 +156,5 @@ class SGNet_CVAE(nn.Module):
             traj_input_temp = self.feature_extractor(inputs[:,start_index:,:])
             traj_input = traj_input_temp.new_zeros((inputs.size(0), inputs.size(1), traj_input_temp.size(-1)))
             traj_input[:,start_index:,:] = traj_input_temp
-            cvae_dec_hidden, all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities = self.encoder(inputs, targets, traj_input, None, start_index)
-            return cvae_dec_hidden, all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities
+            enc_hidden, all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities = self.encoder(inputs, targets, traj_input, None, start_index)
+            return enc_hidden, all_goal_traj, all_cvae_dec_traj, KLD, total_probabilities

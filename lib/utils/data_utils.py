@@ -1,6 +1,7 @@
 import numpy as np
 import random
 import pickle as pkl
+import math
 import os
 import copy
 import torch
@@ -18,6 +19,75 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
+def random_translate(trajs_obs, trajs_pred):
+    """
+            A random translation
+            Input parameter:
+              NxMx6
+              trajs - should be Ntrajectories x Mtime_step x xy_coords, xy_velocity, xy_acceleration
+            Output parameter:
+              new_trajs - the matrix storing the new, translated trajectories.
+            """
+
+    translated_pred = np.zeros(trajs_pred.shape)
+    translated_obs = np.zeros(trajs_obs.shape)
+
+    low = -2
+    high = 2
+
+    for i in range(trajs_obs.shape[0]):
+        translation = np.random.rand() * (high - low) + low
+        translated_obs[i, :, 0] = trajs_obs[i, :, 0] + translation
+        translated_obs[i, :, 1] = trajs_obs[i, :, 1] + translation
+        translated_obs[i, :, 2] = trajs_obs[i, :, 2] + translation
+        translated_obs[i, :, 3] = trajs_obs[i, :, 3] + translation
+        translated_obs[i, :, 4] = trajs_obs[i, :, 4] + translation
+        translated_obs[i, :, 5] = trajs_obs[i, :, 5] + translation
+
+        translated_pred[i, :, :, 0] = trajs_pred[i, :, :, 0] + translation
+        translated_pred[i, :, :, 1] = trajs_pred[i, :, :, 1] + translation
+
+    return translated_obs, translated_pred
+
+def random_rotate(trajs_obs, trajs_pred, origin=None):
+        """
+        A random rotation angle would be generated and the 2D rotation
+        of the generated angle about the origin would be applied to
+        the trajectories stored in trajs. As the rotation is about
+        the origin, the trajectories should have been normalized
+        so that they are defined around the origin.
+        Input parameter:
+          NxMx6
+          trajs - should be Ntrajectories x Mtime_step x xy_coords, xy_velocity, xy_acceleration
+        Output parameter:
+          new_trajs - the matrix storing the new, rotated trajectories.
+        """
+        rotated_obs = np.zeros(trajs_obs.shape)
+        rotated_pred = np.zeros(trajs_pred.shape)
+
+        pi2 = 2 * np.pi
+        low = -0.25
+        high = 0.25
+
+        if origin is None:
+            orig = np.zeros((2, 1))
+        else:
+            orig = np.array(origin).reshape(2, 1)
+        for i in range(trajs_obs.shape[0]):
+            angle = np.random.rand() * (high - low) + low * pi2
+            cangle, sangle = math.cos(angle), math.sin(angle)
+            rot_mat = np.array([[cangle, -sangle], [sangle, cangle]])
+            # rotated[i, :, [0,1]] = np.matmul(rot_mat, trajs[i, :, [0,1]].T - orig).T
+            # rotated[i, :, [2,3]] = np.matmul(rot_mat, trajs[i, :, [2,3]].T - orig).T
+            # rotated[i, :, [4,5]] = np.matmul(rot_mat, trajs[i, :, [4,5]].T - orig).T
+
+            rotated_obs[i, :, [0, 1]] = np.matmul(rot_mat, trajs_obs[i, :, [0, 1]])
+            rotated_obs[i, :, [2, 3]] = np.matmul(rot_mat, trajs_obs[i, :, [2, 3]])
+            rotated_obs[i, :, [4, 5]] = np.matmul(rot_mat, trajs_obs[i, :, [4, 5]])
+
+            rotated_pred[i] = trajs_pred[i].dot(rot_mat.T)
+
+        return rotated_obs, rotated_pred
 
 
 def build_data_loader(args, phase='train',batch_size=None):

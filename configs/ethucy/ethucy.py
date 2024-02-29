@@ -12,7 +12,7 @@ def parse_sgnet_args():
     parser.add_argument('--hidden_size', default=512, type=int)
     parser.add_argument('--enc_steps', default=8, type=int)
     parser.add_argument('--dec_steps', default=12, type=int)
-    parser.add_argument('--dropout', default=0.5, type=float)
+    parser.add_argument('--dropout', default=0.3, type=float)
     parser.add_argument('--nu', default=0.0, type=float)
     parser.add_argument('--sigma', default=1.0, type=float) 
     parser.add_argument('--ETH_CONFIG', default='./configs/ethucy/ETH_UCY.json', type=str)
